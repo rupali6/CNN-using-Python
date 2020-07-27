@@ -1,0 +1,487 @@
+from __future__ import absolute_import
+from __future__ import division
+from __future__ import print_function
+
+import numpy as np
+            #NumPy is the fundamental package for scientific computing with Python.
+import tensorflow as tf
+            #TensorFlow is a Python library for fast numerical computing
+import pandas as pd
+            #pandas providing high-performance, easy-to-use data structures and data analysis tools
+from tkinter import *
+            #tkinter is for GUI 
+from tkinter import filedialog
+from PIL import ImageTk,Image
+import csv
+import os
+
+TRAIN_URL = "C://Users/hp/AppData/Local/Programs/Python/Python36/mnist_train.csv"
+TEST_URL = "C://Users/hp/AppData/Local/Programs/Python/Python36/mnist_test.csv"
+tf.logging.set_verbosity(tf.logging.INFO)                     #It will tell you all messages that have the label INFO
+
+root=Tk()
+root.geometry("900x900")
+root.title('HANDWRITTEN DIGIT RECOGNITION')
+txt=Text(root,width=25,height=5)
+txt.grid(row=8,column=6)
+
+
+#CSV_COLUMN_NAMES=['name','gender']
+
+'''~~~~~~~~~~Function 1: Create a function to load data from CSV file and return features and labels ~~~~~~~~~~~~'''
+def load_data(label_name='label'):
+    """Parses the csv file in TRAIN_URL and TEST_URL."""
+
+    sess=tf.Session()                                               #Session is a class for running TensorFlow operations.
+    # Parse the local CSV file.
+    train = pd.read_csv(filepath_or_buffer = TRAIN_URL,
+                        header=0  # ignore the first row of the CSV file.)               
+
+    test = pd.read_csv(filepath_or_buffer = TEST_URL,
+                        header=0  # ignore the first row of the CSV file.
+                       )
+    # train now holds a pandas DataFrame, which is data structure
+    # analogous to a table.
+
+    # 1. Assign the DataFrame's labels (the right-most column) to train_label.
+    # 2. Delete (pop) the labels from the DataFrame.
+    # 3. Assign the remainder of the DataFrame to train_features
+    train_features, train_label = train, train.pop(label_name)
+    test_features, test_label = test, test.pop(label_name)
+    #train_features=train_features.as_matrix()
+    #train_label=train_features.as_matrix()
+    print("Shape of train_features is",sess.run(tf.shape(train_features)))
+    print("Shape of train_label is",sess.run(tf.shape(train_label)))
+
+    # Return four DataFrames.
+    return (train_features, train_label,test_features,test_label)
+
+'''~~~~~~~~~Function 2: Create function to generate a dataset using features ~~~~~~~~~~~~'''
+# Explanation of train_input_fn()
+def train_input_fn(features, labels, batch_size):
+        dataset = tf.data.Dataset.from_tensor_slices((dict(features), labels))
+        dataset = dataset.shuffle(buffer_size=1000).repeat(count=None).batch(batch_size)
+        #print(dataset.output_types)
+        #print(dataset.output_shapes)
+        return dataset.make_one_shot_iterator().get_next()
+        
+'''~~~~~~~~~Function 3: Create function to evaluate  ~~~~~~~~~~~~'''
+def eval_input_fn(features, labels=None, batch_size=None):
+    """An input function for evaluation or prediction"""
+    if labels is None:
+        # No labels, use only features.
+        inputs = features
+    else:
+        inputs = (features, labels)
+
+    # Convert inputs to a tf.dataset object.
+    dataset = tf.data.Dataset.from_tensor_slices(inputs)
+
+    # Batch the examples
+    assert batch_size is not None, "batch_size must not be None"
+    dataset = dataset.batch(batch_size)
+
+    # Return the read end of the pipeline.
+    return dataset.make_one_shot_iterator().get_next()
+
+'''~~~~~~~~~Function 4: Create the model function for CNN~~~~~~~~'''
+def cnn_model_fn(features, labels, mode):
+  """Model function for CNN."""
+  # Input Layer
+  # Reshape X to 4-D tensor: [batch_size, width, height, channels]
+  # MNIST images are 28x28 pixels, and have one color channel
+  print('Cnn_model_function called')
+  input_layer = tf.reshape(features["x"], [-1, 28, 28, 1]) # -1 flattens into 1D
+ #????????????????????????????? input_layer = tf.reshape(features[features], [-1, 28, 28, 1]) # -1 flattens into 1D
+ #????????????????????????????? input_layer = tf.reshape(features[features], [-1, 28, 28, 1]) # -1 flattens into 1D
+ 
+  # Convolutional Layer #1
+  # Computes 32 features using a 5x5 filter with ReLU activation.
+  # Padding is added to preserve width and height.
+  # Input Tensor Shape: [batch_size, 28, 28, 1]
+  # Output Tensor Shape: [batch_size, 28, 28, 32]
+  conv1 = tf.layers.conv2d(
+      inputs=input_layer,
+      filters=32,
+      kernel_size=[5, 5],
+      padding="same",
+      activation=tf.nn.relu)
+  
+  # Pooling Layer #1
+  # First max pooling layer with a 2x2 filter and stride of 2
+  # Input Tensor Shape: [batch_size, 28, 28, 32]
+  # Output Tensor Shape: [batch_size, 14, 14, 32]
+  pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2)
+
+  # Convolutional Layer #2
+  # Computes 64 features using a 5x5 filter.
+  # Padding is added to preserve width and height.
+  # Input Tensor Shape: [batch_size, 14, 14, 32]
+  # Output Tensor Shape: [batch_size, 14, 14, 64]
+  conv2 = tf.layers.conv2d(
+      inputs=pool1,
+      filters=64,
+      kernel_size=[5, 5],
+      padding="same",
+      activation=tf.nn.relu)
+
+  # Pooling Layer #2
+  # Second max pooling layer with a 2x2 filter and stride of 2
+  # Input Tensor Shape: [batch_size, 14, 14, 64]
+  # Output Tensor Shape: [batch_size, 7, 7, 64]
+  pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2)
+
+  # Flatten tensor into a batch of vectors
+  # Input Tensor Shape: [batch_size, 7, 7, 64]
+  # Output Tensor Shape: [batch_size, 7 * 7 * 64]
+  pool2_flat = tf.reshape(pool2, [-1, 7 * 7 * 64])
+  print("Pool flat reshape")
+  # Dense Layer
+  # Densely connected layer with 1024 neurons
+  # Input Tensor Shape: [batch_size, 7 * 7 * 64]
+  # Output Tensor Shape: [batch_size, 1024]
+  dense = tf.layers.dense(inputs=pool2_flat, units=1024, activation=tf.nn.relu)
+
+  # Add dropout operation; 0.6 probability that element will be kept
+  dropout = tf.layers.dropout(
+      inputs=dense, rate=0.4, training=mode == tf.estimator.ModeKeys.TRAIN)
+
+  # Logits layer
+  # Input Tensor Shape: [batch_size, 1024]
+  # Output Tensor Shape: [batch_size, 10]
+
+  logits = tf.layers.dense(inputs=dropout, units=10)
+
+  #logits = tf.layers.dense(inputs=dense, units=10)
+
+  print('Logits')
+  predictions = {
+      # Generate predictions (for PREDICT and EVAL mode)
+      "classes": tf.argmax(input=logits, axis=1),
+      # Add `softmax_tensor` to the graph. It is used for PREDICT and by the
+      # `logging_hook`.
+      "probabilities": tf.nn.softmax(logits, name="softmax_tensor")
+      #print("probabilities",probabilities)
+  }
+  if mode == tf.estimator.ModeKeys.PREDICT:
+    return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+
+  # Calculate Loss (for both TRAIN and EVAL modes)
+  loss = tf.losses.sparse_softmax_cross_entropy(labels=labels, logits=logits)
+
+  # Configure the Training Op (for TRAIN mode)
+  if mode == tf.estimator.ModeKeys.TRAIN:
+    optimizer = tf.train.GradientDescentOptimizer(learning_rate=0.001)
+    train_op = optimizer.minimize(
+        loss=loss,
+        global_step=tf.train.get_global_step())
+    return tf.estimator.EstimatorSpec(mode=mode, loss=loss, train_op=train_op)
+
+  # Add evaluation metrics (for EVAL mode)
+  eval_metric_ops = {
+      "accuracy": tf.metrics.accuracy(
+          labels=labels, predictions=predictions["classes"])}
+  print('function finished')
+  return tf.estimator.EstimatorSpec(
+      mode=mode, loss=loss, eval_metric_ops=eval_metric_ops)
+    
+def accuracy():
+
+        print('''~~~~~~~~~~~Step 1 : Call load_data(),  which loads the data from csv(input file) and
+                        the function returns train_features and train_label~~~~~~~~~~~~~~~~''')
+        print('\n\n~~~~~~~~Dropout = Yes,      Activation function = ReLU,     Dataset = 50%train data and 50%test data~~~~~~~~~~~\n')
+        (train_feature, train_label,test_feature, test_label)= load_data() 
+
+        #print('''~~~~~~~~~~Step 2: Make feature column which contains the features i.e. input ~~~~~~~~~~~~~~'''
+        #make feature column
+        '''my_feature_columns = []
+        for key in train_feature.keys():
+            my_feature_columns.append(tf.feature_column.numeric_column(key=key))'''
+
+        print('''~~~~~~~~~~ Step 3: Make Classifier using a model of estimator and pass the feature columns and model dir and other parameters in it ~~~~~~~~''')
+        #make classifier
+        #Estimator class to train and evaluate TensorFlow models
+        classifier = tf.estimator.Estimator(
+              model_fn=cnn_model_fn, model_dir="C://Users/hp/AppData/Local/Programs/Python/Python36/CheckPoints Folder")
+
+        #old path for model save
+        '''classifier = tf.estimator.Estimator(
+              model_fn=cnn_model_fn, model_dir="E:///pythonPractice/tensorflowProgramsPractice/New folder")'''
+
+        '''classifier = tf.estimator.DNNClassifier( 
+            feature_columns=my_feature_columns,
+            hidden_units=[10, 10],
+            n_classes=10,
+            model_dir="E:///pythonPractice/tensorflowProgramsPractice/New folder")'''
+
+        print('''~~~~~~~~~~Step 4: Train the network using classifier, call train_input_fn which returns the dataset and trains the network using that dataset~~~~~~~~~~~~''')
+        #train the network
+
+        train_input_fn = tf.estimator.inputs.numpy_input_fn(
+                x={"x": np.array(train_feature, dtype=np.float32)},   #outputting features
+                y=train_label,                                        #targets
+                batch_size=100,
+                num_epochs=None,
+                shuffle=True)
+        classifier.train( 
+            input_fn=train_input_fn, steps=20000)
+
+        '''classifier.train( 
+            input_fn=lambda:train_input_fn(train_feature, train_label, 100), steps=10000)
+        print('')'''
+
+        '''~~~~~~~~~~Step 5: Evaluate the network using classifier and call eval_input_fn~~~~~~~~~~~~'''
+
+        # Evaluate the model and print results
+        print('\n\n Evaluate model called for testing')
+        eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+              x={"x": np.array(test_feature, dtype=np.float32)},
+              y=test_label,
+              num_epochs=10,
+              shuffle=False)
+        eval_results = classifier.evaluate(input_fn=eval_input_fn)
+        #rk= eval_results
+        #print(eval_results)
+       
+        
+        acc(eval_results)
+        '''
+
+        print('\n\n\nPrinting text set accuracy\n\n')
+        # Evaluate the model.
+        eval_result = classifier.evaluate(
+            input_fn=lambda:eval_input_fn(train_feature, train_label))
+
+        print('\nTest set accuracy: {accuracy:0.3f}\n'.format(**eval_result))'''
+
+def working():
+    def png_csv(filename):
+        file_address = filename
+        img_file = Image.open(file_address)
+        img_grey = img_file.convert('L')
+        img_grey.save('Result.png')
+        
+        panel=Label(root,text='GRAY SCALE IMAGE')
+        panel.grid(row=10,column=8)
+        
+        img2=Image.open("Result.png")
+        img2=img2.resize((250,250),Image.ANTIALIAS)
+        img2=ImageTk.PhotoImage(img2)
+        label2=Label(root,image=img2)
+        label2.image=img2
+        label2.grid(row=12,column =8)
+        
+        print(img_grey.format, img_grey.size, img_grey.mode)
+        print("TYPE:  ",type(img_grey.size))
+        l,b=img_grey.size
+        print(" ",l," ",b)
+        if l>28 or b>28:
+            #win=Tk()
+            #label=Label(root, text='')
+            txt.delete(0.0,'end')
+            label=Label(root,text="FIle size not supported")
+            label.grid(row=9,column=6)
+            
+        else:
+            value = np.asarray(img_grey.getdata(),dtype=np)
+            value = value.flatten()
+            
+            j=0
+            for i in value:
+                value[j]=255-i
+                j=j+1
+            with open("imgpixels.csv",'a') as f:
+                writer = csv.writer(f)
+                writer.writerow(value)
+            return "C://Users/hp/AppData/Local/Programs/Python/Python36/imgpixels.csv"
+        
+
+    filename= filedialog.askopenfilename(filetypes = (("All Files","*.*"),("Digits",".csv"),("File","*.txt"),))
+    addr=png_csv(filename)
+    
+    WORKING_SAMPLE_URL = addr
+
+    tf.logging.set_verbosity(tf.logging.INFO)
+
+    #CSV_COLUMN_NAMES=['name','gender']
+
+    '''~~~~~~~~~~Function 1: Create a function to load data from CSV file and return features and labels ~~~~~~~~~~~~'''
+    def load_data2(label_name='label'):
+        """Parses the csv file in TRAIN_URL and TEST_URL."""
+
+        sess=tf.Session()
+        # Parse the local CSV file.
+        sample_features = pd.read_csv(filepath_or_buffer = WORKING_SAMPLE_URL,
+                            header=0  # ignore the first row of the CSV file.
+                           )
+
+        #print("Sample features are"+sample_features)
+        # Return four DataFrames.
+        return (sample_features)
+
+
+    '''~~~~~~~~~Function 4: Create the model function for CNN~~~~~~~~'''
+    def cnn_model_fn2(features, labels, mode):
+      """Model function for CNN."""
+      # Input Layer
+      # Reshape X to 4-D tensor: [batch_size, width, height, channels]
+      # MNIST images are 28x28 pixels, and have one color channel
+      print('Cnn_model_function called')
+      input_layer = tf.reshape(features["x"], [-1, 28, 28, 1]) # -1 flattens into 1D
+     #????????????????????????????? input_layer = tf.reshape(features[features], [-1, 28, 28, 1]) # -1 flattens into 1D
+     #????????????????????????????? input_layer = tf.reshape(features[features], [-1, 28, 28, 1]) # -1 flattens into 1D
+
+      
+      # Convolutional Layer #1
+      # Computes 32 features using a 5x5 filter with ReLU activation.
+      # Padding is added to preserve width and height.
+      # Input Tensor Shape: [batch_size, 28, 28, 1]
+      # Output Tensor Shape: [batch_size, 28, 28, 32]
+      conv1 = tf.layers.conv2d(
+          inputs=input_layer,
+          filters=32,
+          kernel_size=[5, 5],
+          padding="same",
+          activation=tf.nn.relu)
+      
+      # Pooling Layer #1
+      # First max pooling layer with a 2x2 filter and stride of 2
+      # Input Tensor Shape: [batch_size, 28, 28, 32]
+      # Output Tensor Shape: [batch_size, 14, 14, 32]
+      pool1 = tf.layers.max_pooling2d(inputs=conv1, pool_size=[2, 2], strides=2)
+
+      # Convolutional Layer #2
+      # Computes 64 features using a 5x5 filter.
+      # Padding is added to preserve width and height.
+      # Input Tensor Shape: [batch_size, 14, 14, 32]
+      # Output Tensor Shape: [batch_size, 14, 14, 64]
+      conv2 = tf.layers.conv2d(
+          inputs=pool1,
+          filters=64,
+          kernel_size=[5, 5],
+          padding="same",
+          activation=tf.nn.relu)
+
+      # Pooling Layer #2
+      # Second max pooling layer with a 2x2 filter and stride of 2
+      # Input Tensor Shape: [batch_size, 14, 14, 64]
+      # Output Tensor Shape: [batch_size, 7, 7, 64]
+      pool2 = tf.layers.max_pooling2d(inputs=conv2, pool_size=[2, 2], strides=2)
+
+      # Flatten tensor into a batch of vectors
+      # Input Tensor Shape: [batch_size, 7, 7, 64]
+      # Output Tensor Shape: [batch_size, 7 * 7 * 64]
+      pool2_flat = tf.reshape(pool2, [-1, 7 * 7 * 64])
+      print("Pool flat reshape")
+      # Dense Layer
+      # Densely connected layer with 1024 neurons
+      # Input Tensor Shape: [batch_size, 7 * 7 * 64]
+      # Output Tensor Shape: [batch_size, 1024]
+      dense = tf.layers.dense(inputs=pool2_flat, units=1024, activation=tf.nn.relu)
+
+      # Add dropout operation; 0.6 probability that element will be kept
+      dropout = tf.layers.dropout(
+          inputs=dense, rate=0.4, training=mode == tf.estimator.ModeKeys.TRAIN)
+
+      # Logits layer
+      # Input Tensor Shape: [batch_size, 1024]
+      # Output Tensor Shape: [batch_size, 10]
+
+      logits = tf.layers.dense(inputs=dropout, units=10)
+
+      #logits = tf.layers.dense(inputs=dense, units=10)
+
+      print('Logits')
+      predictions = {
+          # Generate predictions (for PREDICT and EVAL mode)
+          "classes": tf.argmax(input=logits, axis=1),
+          # Add `softmax_tensor` to the graph. It is used for PREDICT and by the
+          # `logging_hook`.
+          "probabilities": tf.nn.softmax(logits, name="softmax_tensor")
+          #print("probabilities",probabilities)
+      }
+      if mode == tf.estimator.ModeKeys.PREDICT:
+        return tf.estimator.EstimatorSpec(mode=mode, predictions=predictions)
+
+
+    def accuracy2():
+
+
+            print('''~~~~~~~~~~~Step 1 : Call load_data(),  which loads the data from csv(input file) and
+                            the function returns train_features and train_label~~~~~~~~~~~~~~~~''')
+            print('\n\n~~~~~~~~Dropout = Yes,      Activation function = ReLU,     Dataset = 50%train data and 50%test data~~~~~~~~~~~\n')
+            (sample_features)= load_data2() 
+      #print('''~~~~~~~~~~Step 2: Make feature column which contains the features i.e. input ~~~~~~~~~~~~~~'''
+            #make feature column
+            '''my_feature_columns = []
+            for key in train_feature.keys():
+                my_feature_columns.append(tf.feature_column.numeric_column(key=key))'''
+
+
+            print('''~~~~~~~~~~ Step 3: Make Classifier using a model of estimator and pass the feature columns and model dir and other parameters in it ~~~~~~~~''')
+            #make classifier
+
+            classifier = tf.estimator.Estimator(
+                  model_fn=cnn_model_fn, model_dir="C://Users/hp/AppData/Local/Programs/Python/Python36/CheckPoints Folder")
+
+
+            '''~~~~~~~~~~Step 5: Evaluate the network using classifier and call eval_input_fn'''
+            #Predict model code
+
+            eval_input_fn = tf.estimator.inputs.numpy_input_fn(
+                  x={"x": np.array(sample_features, dtype=np.float32)},
+                  num_epochs=1,
+                  shuffle=False)
+            eval_results=classifier.predict(input_fn=eval_input_fn)
+            for xa in eval_results:
+                print(xa)
+            
+            
+            acc(xa)
+            '''
+
+            print('\n\n\nPrinting text set accuracy\n\n')
+            # Evaluate the model.
+            eval_result = classifier.evaluate(
+                input_fn=lambda:eval_input_fn(train_feature, train_label))
+
+            print('\nTest set accuracy: {accuracy:0.3f}\n'.format(**eval_result))'''
+
+
+    accuracy2()
+    
+    img=Image.open(filename)
+    img=img.resize((250,250),Image.ANTIALIAS)
+    img=ImageTk.PhotoImage(img)
+    label=Label(root,image=img)
+    label.image=img
+    label.grid(row=10,column =6)
+
+    
+label=Label(root, text='HANDWRITTEN DIGIT RECOGNITION !',font = "Helvetica 16 bold italic")
+label.grid(row=1,column=6)
+
+label=Label(root, text='')
+label.grid(row=2,column=6)
+
+label=Label(root, text='')
+label.grid(row=3,column=6)
+
+button1=Button(root,text="evaluate Accuracy",bg="purple",fg="white",command=accuracy)
+button1.grid(row=4,column=6)
+
+label=Label(root, text='')
+label.grid(row=5,column=6)
+
+button2=Button(root,text="recognize",bg="purple",fg="white",command=working)
+button2.grid(row=6,column=6)
+
+label=Label(root, text='')
+label.grid(row=7,column=6)
+
+def acc(ar):
+        
+        txt.insert(0.0,str(ar))
+        
+        input = txt.get("1.0",END)
+        root.mainloop()
